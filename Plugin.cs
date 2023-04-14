@@ -155,64 +155,6 @@ namespace Loader
         public void PreProcessMetadata(BinaryObjectStream stream, PluginPreProcessMetadataEventInfo info)
         {
             PluginServices.For(this).StatusUpdate("Decrypting metadata");
-
-            byte[] metadata = stream.ToArray();
-
-            // we start our metadata header decryption journey with key 0:
-            // from there, we will calculate key 1, key 2, and finally key 3
-            // key 0 -> key 1 -> key 2 -> key 3
-
-            // key 0 is hardcoded in the binary at 0x14DEE9
-            PluginOptionNumber<uint>[] headerKeySeeds = {_headerKeySeed0Option, _headerKeySeed1Option, _headerKeySeed2Option, _headerKeySeed3Option};
-            byte[] key0 = headerKeySeeds.Select(option => option.Value).SelectMany(DWordToByteArray).ToArray();
-            Debug.WriteLine("key 0:");
-            PrintBuffer(key0);
-
-            // key 1 is derived from key 0
-            byte[] key1 = GetKey1(metadata, key0);
-            Debug.WriteLine("key 1:");
-            PrintBuffer(key1);
-
-            // key 2 is derived from key 1
-            uint[] key2 = GetKey2(key1);
-            Debug.WriteLine("key 2:");
-            PrintBuffer(key2);
-
-            // key 3 is derived from key 2
-            // this is the key used to decrypt the bulk of metadata header, bytes 0x8 to 0x108
-            uint[] key3 = GetKey3(key2);
-            Debug.WriteLine("key 3:");
-            PrintBuffer(key3);
-
-            // last pass header key is calculated in the binary at around 0xD33E4 - 0xD341C;
-            // it's a fuck fest of vector operations, but the result is pretty banal:
-            // 0x02, 0x03, ..., 0x41
-            // the first 16 bytes of this key are used at the very end of bytes 0x8 to 0x108 decryption process,
-            // hence the name
-            byte[] lastPassHeaderKey = GetLastPassHeaderKey(_headerLastPassKeySeedOption.Value);
-            Debug.WriteLine("last pass header key:");
-            PrintBuffer(lastPassHeaderKey);
-
-            // the first 8 bytes are hardcoded in the binary at around 0x9A9A0 - 0x9AA00 to:
-            // 0x0 0x0 0x0 0x0 [whatever it was in the encrypted metadata] 0x00 0x00 0x00;
-            // the last 8 bytes, 0x108 to 0x10F, are XOR-encrypted with a single byte,
-            // and this byte is hardcoded in a MOV operation in the binary at 0xC5BD4;
-            // with key 3, last pass header key, and this last bytes key, we can now decrypt the whole metadata header
-            byte[] decryptedMetadataHeader = DecryptMetadataHeader(metadata, key3, lastPassHeaderKey, _headerLastBytesKeyOption.Value);
-            Debug.WriteLine("decrypted metadata header:");
-            PrintBuffer(decryptedMetadataHeader);
-
-            // metadata body (everything after the header) is XOR-encrypted;
-            // the decryption key is generated from an initial hardcoded value:
-            // the return value of the subroutine starting at 0x1CF20;
-            // full decryption key is then calculated in the subroutine at 0xC5C20
-            byte[] decryptedMetadataBody = DecryptMetadataBody(metadata, _bodyKeySeedOption.Value);
-            Debug.WriteLine("decrypted metadata body (first 256 bytes):");
-            PrintBuffer(decryptedMetadataBody.Take(0x100).ToArray());
-
-            // decrypted metadata is the concatenation of decrypted header and decrypted body
-            stream.Write(0, decryptedMetadataHeader.Concat(decryptedMetadataBody).ToArray());
-            info.IsStreamModified = true;
         }
 
         public void PostProcessImage<T>(FileFormatStream<T> stream, PluginPostProcessImageEventInfo info) where T : FileFormatStream<T>
